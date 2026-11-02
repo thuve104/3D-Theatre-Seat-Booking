@@ -1,0 +1,421 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  CUSTOMER
+  ADMIN
+  THEATRE_MANAGER
+  STAFF
+}
+
+enum SeatCategory {
+  STANDARD
+  PREMIUM
+  VIP
+  RECLINER
+  COUPLE
+  ACCESSIBLE
+}
+
+enum ShowSeatStatus {
+  AVAILABLE
+  LOCKED
+  BOOKED
+  UNAVAILABLE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum MediaType {
+  POSTER
+  BACKDROP
+  TRAILER_MP4
+  TRAILER_HLS
+  THUMBNAIL
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        RoleName @unique
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id               String             @id @default(cuid())
+  email            String             @unique
+  passwordHash     String?
+  googleId         String?            @unique
+  emailVerified    DateTime?
+  resetToken       String?            @unique
+  resetTokenExpiry DateTime?
+  roleId           String
+  role             Role               @relation(fields: [roleId], references: [id])
+  profile          CustomerProfile?
+  seatLocks        SeatLock[]
+  bookings         Booking[]
+  reviews          Review[]
+  notifications    Notification[]
+  adminLogs        AdminActivityLog[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([email])
+}
+
+model CustomerProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName       String
+  phone          String?
+  avatarUrl      String?
+  savedCinemaIds String[] @default([])
+  preferences    Json     @default("{\"preferredSeatCategory\":\"PREMIUM\",\"enableSpatialAudio\":true}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Cinema {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  city        String
+  address     String
+  latitude    Float
+  longitude   Float
+  facilities  String[]
+  phone       String
+  isActive    Boolean      @default(true)
+  auditoriums Auditorium[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([city, isActive])
+}
+
+model Auditorium {
+  id              String            @id @default(cuid())
+  cinemaId        String
+  cinema          Cinema            @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
+  name            String
+  totalCapacity   Int
+  acousticProfile Json?
+  layout          AuditoriumLayout?
+  seats           Seat[]
+  shows           Show[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([cinemaId, name])
+}
+
+model AuditoriumLayout {
+  id               String     @id @default(cuid())
+  auditoriumId     String     @unique
+  auditorium       Auditorium @relation(fields: [auditoriumId], references: [id], onDelete: Cascade)
+  width            Float      @default(24.0)
+  length           Float      @default(30.0)
+  height           Float      @default(12.0)
+  screenWidth      Float      @default(18.0)
+  screenHeight     Float      @default(7.6)
+  screenPositionZ  Float      @default(-13.5)
+  screenElevationY Float      @default(5.2)
+  screenCurve      Float      @default(0.08)
+  numRows          Int        @default(10)
+  seatsPerRow      Int        @default(16)
+  rowSpacing       Float      @default(1.35)
+  seatSpacing      Float      @default(0.68)
+  baseElevation    Float      @default(0.4)
+  seatElevationInc Float      @default(0.32)
+  curveFactor      Float      @default(0.15)
+  aislePositions   Int[]      @default([4, 12])
+  rowCategoryMap   Json
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+}
+
+model Seat {
+  id           String        @id @default(cuid())
+  auditoriumId String
+  auditorium   Auditorium    @relation(fields: [auditoriumId], references: [id], onDelete: Cascade)
+  rowLabel     String
+  rowIndex     Int
+  seatNumber   Int
+  category     SeatCategory  @default(STANDARD)
+  basePrice    Decimal       @db.Decimal(10, 2)
+  posX         Float
+  posY         Float
+  posZ         Float
+  rotX         Float         @default(0)
+  rotY         Float         @default(0)
+  rotZ         Float         @default(0)
+  isActive     Boolean       @default(true)
+  showSeats    ShowSeat[]
+  bookingSeats BookingSeat[]
+  seatLocks    SeatLock[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([auditoriumId, rowLabel, seatNumber])
+  @@index([auditoriumId])
+}
+
+model Movie {
+  id              String       @id @default(cuid())
+  title           String
+  slug            String       @unique
+  description     String       @db.Text
+  genres          String[]
+  durationMinutes Int
+  releaseDate     DateTime
+  language        String
+  subtitles       String[]
+  ageRating       String
+  imdbRating      Float?
+  imdbSourceUrl   String?
+  director        String
+  cast            Json
+  status          String       @default("NOW_SHOWING")
+  isFeatured      Boolean      @default(false)
+  media           MovieMedia[]
+  shows           Show[]
+  reviews         Review[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([status, releaseDate])
+}
+
+model MovieMedia {
+  id        String    @id @default(cuid())
+  movieId   String
+  movie     Movie     @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  type      MediaType
+  url       String
+  isPrimary Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([movieId, type])
+}
+
+model Show {
+  id              String     @id @default(cuid())
+  movieId         String
+  movie           Movie      @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  auditoriumId    String
+  auditorium      Auditorium @relation(fields: [auditoriumId], references: [id], onDelete: Cascade)
+  startTime       DateTime
+  endTime         DateTime
+  basePrice       Decimal    @db.Decimal(10, 2)
+  categoryPricing Json
+  isActive        Boolean    @default(true)
+  showSeats       ShowSeat[]
+  seatLocks       SeatLock[]
+  bookings        Booking[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([movieId, startTime])
+  @@index([auditoriumId, startTime])
+}
+
+model ShowSeat {
+  id        String         @id @default(cuid())
+  showId    String
+  show      Show           @relation(fields: [showId], references: [id], onDelete: Cascade)
+  seatId    String
+  seat      Seat           @relation(fields: [seatId], references: [id], onDelete: Cascade)
+  status    ShowSeatStatus @default(AVAILABLE)
+  price     Decimal        @db.Decimal(10, 2)
+  version   Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([showId, seatId])
+  @@index([showId, status])
+}
+
+model SeatLock {
+  id        String   @id @default(cuid())
+  showId    String
+  show      Show     @relation(fields: [showId], references: [id], onDelete: Cascade)
+  seatId    String
+  seat      Seat     @relation(fields: [seatId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([showId, seatId])
+  @@index([expiresAt])
+}
+
+model Coupon {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  discountPercent Float?
+  discountAmount  Decimal?  @db.Decimal(10, 2)
+  minOrderAmount  Decimal   @default(0) @db.Decimal(10, 2)
+  maxUses         Int       @default(500)
+  usedCount       Int       @default(0)
+  expiresAt       DateTime
+  isActive        Boolean   @default(true)
+  bookings        Booking[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Booking {
+  id            String        @id @default(cuid())
+  referenceCode String        @unique
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  showId        String
+  show          Show          @relation(fields: [showId], references: [id])
+  customerName  String
+  customerEmail String
+  customerPhone String
+  subtotal      Decimal       @db.Decimal(10, 2)
+  taxAmount     Decimal       @db.Decimal(10, 2)
+  bookingFee    Decimal       @db.Decimal(10, 2)
+  discountTotal Decimal       @default(0) @db.Decimal(10, 2)
+  totalAmount   Decimal       @db.Decimal(10, 2)
+  couponId      String?
+  coupon        Coupon?       @relation(fields: [couponId], references: [id])
+  status        BookingStatus @default(PENDING)
+  seats         BookingSeat[]
+  payment       Payment?
+  tickets       Ticket[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([referenceCode])
+}
+
+model BookingSeat {
+  id        String       @id @default(cuid())
+  bookingId String
+  booking   Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  showId    String
+  seatId    String
+  seat      Seat         @relation(fields: [seatId], references: [id])
+  pricePaid Decimal      @db.Decimal(10, 2)
+  category  SeatCategory
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([showId, seatId])
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  bookingId         String        @unique
+  booking           Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  provider          String        @default("STRIPE")
+  providerPaymentId String        @unique
+  amount            Decimal       @db.Decimal(10, 2)
+  currency          String        @default("USD")
+  status            PaymentStatus @default(PENDING)
+  metadata          Json?
+  refunds           Refund[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model Refund {
+  id               String   @id @default(cuid())
+  paymentId        String
+  payment          Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  providerRefundId String   @unique
+  amount           Decimal  @db.Decimal(10, 2)
+  reason           String
+  status           String   @default("PROCESSED")
+  processedById    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Ticket {
+  id          String    @id @default(cuid())
+  bookingId   String
+  booking     Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  ticketCode  String    @unique
+  qrSignature String    @unique
+  qrDataUrl   String    @db.Text
+  seatLabels  String[]
+  isUsed      Boolean   @default(false)
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ticketCode])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movieId   String
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  rating    Int
+  comment   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, movieId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isRead])
+}
+
+model AdminActivityLog {
+  id         String   @id @default(cuid())
+  adminId    String
+  admin      User     @relation(fields: [adminId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  payload    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([adminId, createdAt])
+}
